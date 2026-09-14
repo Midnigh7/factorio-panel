@@ -586,6 +586,22 @@ def api_logs():
     out, _ = run(["docker", "logs", "--tail", "100", CONTAINER])
     return jsonify({"logs": out.splitlines()[-100:]})
 
+@app.route("/api/liveplayers")
+@login_required
+def api_liveplayers():
+    lua = ("/silent-command local t={} for _,p in pairs(game.connected_players) do "
+           "t[#t+1]={name=p.name,x=math.floor(p.position.x),y=math.floor(p.position.y),"
+           "surface=p.surface.name,online=math.floor(p.online_time/3600),afk=math.floor(p.afk_time/3600),"
+           "admin=p.admin} end rcon.print(helpers.table_to_json(t))")
+    try:
+        out = rcon(lua)
+        players = json.loads(out) if out.strip() else []
+        if isinstance(players, dict):  # lua {} → {} when empty
+            players = []
+        return jsonify({"ok": True, "players": players})
+    except Exception as e:
+        return jsonify({"ok": True, "players": [], "note": str(e)[:80]})
+
 # ── routes: console & player admin ───────────────────────────────────────────
 @app.route("/api/rcon", methods=["POST"])
 @role_required("moderator")
@@ -1329,6 +1345,11 @@ table{width:100%;border-collapse:collapse;font-size:.85rem}td,th{padding:.35rem 
 </div>
 
 <div id=t-players class=hidden>
+<div class=card><h3>Live players <span id=lpcount></span></h3>
+<div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-start">
+<canvas id=lpmap width=340 height=340 style="background:#12121a;border-radius:8px;flex-shrink:0"></canvas>
+<div style="flex:1;min-width:260px"><div id=lptable>—</div></div></div>
+<p class=note>Positions via RCON, refreshed every 5s while this tab is open. Map is centered on spawn (0,0); grid = 100 tiles.</p></div>
 <div class=card><h3>Player actions</h3>
 <input type=text id=pname placeholder="player name" style="width:160px">
 <input type=text id=preason placeholder="reason (kick/ban)" style="width:200px"><br>
@@ -1437,7 +1458,7 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
  if(t.dataset.t==='mods')mods();if(t.dataset.t==='settings')loadForm();
  if(t.dataset.t==='world'){loadWorld();loadMapgen();}
  if(t.dataset.t==='admin'){usersUI();webhookUI();}
- if(t.dataset.t==='players')lists();if(t.dataset.t==='saves'){saves();bootsaveUI();}});
+ if(t.dataset.t==='players'){lists();lpStart();}if(t.dataset.t==='saves'){saves();bootsaveUI();}});
 async function refresh(){const s=await j('/api/status');
  const st=document.getElementById('state');st.textContent=s.container.state;
  st.className='pill '+(s.container.state==='running'?'run':'stop');
@@ -1544,6 +1565,36 @@ async function loadSettings(){const r=await j('/api/settings');document.getEleme
 async function saveSettings(){let v;try{v=JSON.parse(document.getElementById('settingsbox').value)}catch(e){alert('Invalid JSON: '+e);return;}
  const r=await post('/api/settings',{settings:v});alert(r.ok?'Saved. Restart to apply.':'Failed: '+r.error);}
 // players
+// live players
+let lpTimer=null;
+const LP_COLORS=['#e8902a','#6c9','#8ab','#e88','#c9d','#dd7'];
+async function livePlayers(){const r=await j('/api/liveplayers');if(!r.ok)return;
+ const ps=r.players;document.getElementById('lpcount').textContent='('+ps.length+')';
+ document.getElementById('lptable').innerHTML=ps.length?
+ '<table><tr><th></th><th>player</th><th>pos</th><th>surface</th><th>online</th><th>afk</th></tr>'+
+ ps.map((p,i)=>`<tr><td><span style="color:${LP_COLORS[i%6]}">●</span></td><td>${p.name}${p.admin?' <span class=badge>admin</span>':''}</td>
+ <td>${p.x}, ${p.y}</td><td>${p.surface}</td><td>${fmtMin(p.online)}</td><td>${p.afk>1?fmtMin(p.afk):'—'}</td></tr>`).join('')+'</table>'
+ :'<span class=note>nobody online</span>';
+ drawMap(ps);}
+function fmtMin(m){return m>=60?Math.floor(m/60)+'h '+(m%60)+'m':m+'m';}
+function drawMap(ps){const cv=document.getElementById('lpmap'),ctx=cv.getContext('2d');
+ ctx.clearRect(0,0,340,340);
+ // scale: fit all players + margin, min ±200 tiles
+ let ext=200;for(const p of ps)ext=Math.max(ext,Math.abs(p.x)*1.2,Math.abs(p.y)*1.2);
+ const sc=160/ext;
+ ctx.strokeStyle='#1e1e2c';ctx.lineWidth=1;
+ const step=100*sc;
+ for(let g=170%step;g<340;g+=step){ctx.beginPath();ctx.moveTo(g,0);ctx.lineTo(g,340);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,g);ctx.lineTo(340,g);ctx.stroke();}
+ ctx.strokeStyle='#333';ctx.beginPath();ctx.moveTo(170,0);ctx.lineTo(170,340);ctx.stroke();
+ ctx.beginPath();ctx.moveTo(0,170);ctx.lineTo(340,170);ctx.stroke();
+ ctx.fillStyle='#556';ctx.font='9px monospace';ctx.fillText('(0,0)',173,167);
+ ps.forEach((p,i)=>{const x=170+p.x*sc,y=170+p.y*sc;
+  ctx.fillStyle=LP_COLORS[i%6];ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.fill();
+  ctx.fillStyle='#cde';ctx.font='10px system-ui';ctx.fillText(p.name,x+7,y+3);});}
+function lpStart(){livePlayers();if(!lpTimer)lpTimer=setInterval(()=>{
+ if(document.getElementById('t-players').classList.contains('hidden')){clearInterval(lpTimer);lpTimer=null;return;}
+ livePlayers();},5000);}
 async function pact(a){const p=document.getElementById('pname').value.trim();if(!p)return;
  const r=await post('/api/player-action',{action:a,player:p,reason:document.getElementById('preason').value.trim()});
  document.getElementById('pactout').textContent=r.ok?(r.output||'ok'):'Failed: '+r.error;lists();}
