@@ -17,7 +17,20 @@ A modern, single-file web UI for managing a **dockerized Factorio server**. Buil
 - **Users & roles** — viewer / moderator / admin with per-user audit logging (PBKDF2, no external deps)
 - **Version management** — shows running vs latest stable/experimental, one-field update that backs up saves first and pins an exact image tag (no `latest` roulette)
 
-Single Python file. Flask is the only dependency.
+Modular Flask package — `factorio_panel/` holds the code, `app.py` is a thin entry point. Flask is the only dependency.
+
+```
+app.py                     entry point (python app.py, or gunicorn app:app)
+factorio_panel/
+  core.py                  Flask app, config/env, auth & roles, docker/RCON/fs helpers
+  chatmetrics.py           chat watcher → buffer + Discord webhook, metrics sampler
+  auth_routes.py           login, users, panel config
+  players_routes.py        live players, RCON actions, admin/ban/whitelists
+  settings_routes.py       server-settings, world (map-settings), map-gen forms
+  saves_routes.py          saves CRUD, boot-save pinning, version update, backups
+  mods_routes.py           portal search/install/update with dependency resolution
+  ui.py                    login + single-page panel HTML
+```
 
 ## Requirements
 
