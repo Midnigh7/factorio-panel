@@ -4,13 +4,20 @@ from .ui import LOGIN_HTML, PANEL_HTML
 
 # ── routes: auth/basic ───────────────────────────────────────────────────────
 @app.route("/login", methods=["GET", "POST"])
+@rate_limit(30, 60)          # page loads + attempts: 30/min/IP
 def login():
     if request.method == "POST":
+        ip = request.remote_addr
+        if login_blocked(ip):
+            audit(f"LOGIN blocked (lockout) ip={ip}")
+            flash("Too many failed attempts. Locked out for 15 minutes.")
+            return render_template_string(LOGIN_HTML), 429
         time.sleep(0.5)
         username = (request.form.get("username") or "").strip()
         pw = request.form.get("password", "")
         u = find_user(username) if username else None
         if u and verify_pw(pw, u["pw"]):
+            login_succeeded(ip)
             session.update(auth=True, username=u["username"], role=u["role"])
             audit(f"LOGIN ok user={u['username']}")
             return redirect(url_for("index"))
@@ -21,6 +28,7 @@ def login():
             session.update(auth=True, username=name, role="admin")
             audit(f"LOGIN legacy-bootstrap -> created admin {name}")
             return redirect(url_for("index"))
+        login_failed(ip)
         audit(f"LOGIN failed user={username!r}")
         flash("Wrong username or password.")
     return render_template_string(LOGIN_HTML)
@@ -31,6 +39,7 @@ def api_me():
     return jsonify({"ok": True, "username": session.get("username"), "role": current_role()})
 
 @app.route("/api/users", methods=["GET", "POST"])
+@rate_limit(30, 60)
 @role_required("admin")
 def api_users():
     if request.method == "GET":

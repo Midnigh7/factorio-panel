@@ -112,6 +112,61 @@ def role_required(min_role):
         return w
     return deco
 
+# ── rate limiting (in-memory, per-IP sliding windows) ────────────────────────
+_rl_lock = threading.Lock()
+_rl_buckets = {}   # key -> [timestamps]
+
+def _rl_check(key, limit, window_s):
+    """True if the call is allowed; records the hit."""
+    now = time.time()
+    with _rl_lock:
+        hits = _rl_buckets.setdefault(key, [])
+        hits[:] = [t for t in hits if now - t < window_s]
+        if len(hits) >= limit:
+            return False
+        hits.append(now)
+        if len(_rl_buckets) > 5000:  # bound memory against IP churn
+            for k in [k for k, v in _rl_buckets.items() if not v][:1000]:
+                _rl_buckets.pop(k, None)
+        return True
+
+def rate_limit(limit, window_s, scope="ip"):
+    """Decorator: cap calls per remote IP (or ip+path) inside a sliding window."""
+    def deco(f):
+        @wraps(f)
+        def w(*a, **k):
+            key = f"{request.remote_addr}:{f.__name__}" if scope == "ip" else request.remote_addr
+            if not _rl_check(key, limit, window_s):
+                audit(f"RATELIMIT {f.__name__}")
+                if request.path.startswith("/api/"):
+                    return jsonify({"ok": False, "error": "rate limited — slow down"}), 429
+                return "Too many requests — try again shortly.", 429
+            return f(*a, **k)
+        return w
+    return deco
+
+# login lockout: consecutive failures earn a cooldown that survives page reloads
+_fail_lock = threading.Lock()
+_login_fails = {}  # ip -> [timestamps]
+
+def login_failed(ip):
+    with _fail_lock:
+        fails = _login_fails.setdefault(ip, [])
+        now = time.time()
+        fails[:] = [t for t in fails if now - t < 900]
+        fails.append(now)
+
+def login_blocked(ip):
+    with _fail_lock:
+        fails = _login_fails.get(ip, [])
+        now = time.time()
+        fails[:] = [t for t in fails if now - t < 900]
+        return len(fails) >= 8   # 8 failures in 15 min → locked out for the window
+
+def login_succeeded(ip):
+    with _fail_lock:
+        _login_fails.pop(ip, None)
+
 def load_panel_config():
     try: return json.load(open(PANEL_CONFIG_FILE))
     except Exception: return {}

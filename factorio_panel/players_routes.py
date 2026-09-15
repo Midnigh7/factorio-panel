@@ -2,6 +2,7 @@ from .core import *  # noqa: F401,F403 — shared app, helpers, flask names
 
 # ── routes: console & player admin ───────────────────────────────────────────
 @app.route("/api/rcon", methods=["POST"])
+@rate_limit(30, 60)
 @role_required("moderator")
 def api_rcon():
     cmd = (request.json or {}).get("command", "").strip()
@@ -15,6 +16,7 @@ def api_rcon():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/player-action", methods=["POST"])
+@rate_limit(20, 60)
 @role_required("moderator")
 def api_player_action():
     d = request.json or {}

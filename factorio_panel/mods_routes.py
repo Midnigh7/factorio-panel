@@ -60,6 +60,7 @@ def api_mods_remove():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/mods/search")
+@rate_limit(30, 60)
 @login_required
 def api_mods_search():
     q = request.args.get("q", "").strip().lower()
@@ -117,6 +118,7 @@ def _install_one(name, gv, seen):
     return installed
 
 @app.route("/api/mods/install", methods=["POST"])
+@rate_limit(10, 60)
 @role_required("admin")
 def api_mods_install():
     name = (request.json or {}).get("name", "").strip()
@@ -131,6 +133,7 @@ def api_mods_install():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/mods/check-updates")
+@rate_limit(4, 60)
 @login_required
 def api_mods_check_updates():
     files = mod_files()
@@ -149,6 +152,7 @@ def api_mods_check_updates():
     return jsonify({"ok": True, "updates": out})
 
 @app.route("/api/mods/update", methods=["POST"])
+@rate_limit(10, 60)
 @role_required("admin")
 def api_mods_update():
     name = (request.json or {}).get("name", "").strip()

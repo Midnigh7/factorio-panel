@@ -30,6 +30,7 @@ def api_backup():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/saves/upload", methods=["POST"])
+@rate_limit(10, 600)
 @role_required("moderator")
 def api_saves_upload():
     f = request.files.get("file")
@@ -74,6 +75,7 @@ def download_save(name):
 
 # ── routes: version update ───────────────────────────────────────────────────
 @app.route("/api/update", methods=["POST"])
+@rate_limit(3, 300)
 @role_required("admin")
 def api_update():
     version = (request.json or {}).get("version", "").strip()

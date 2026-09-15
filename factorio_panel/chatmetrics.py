@@ -92,6 +92,7 @@ def api_metrics():
 
 # ── off-box backup (scp to a remote host) ────────────────────────────────────
 @app.route("/api/backup-offbox", methods=["POST"])
+@rate_limit(4, 3600)
 @role_required("admin")
 def api_backup_offbox():
     zips = [f for f in os.listdir(SAVES_DIR) if f.endswith(".zip")]
